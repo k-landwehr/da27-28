@@ -1,0 +1,218 @@
+---
+title: "da27-28"
+format: html
+---
+
+```{r}
+library(sf)
+library(osmdata)
+```
+# Define River Object
+
+```{r}
+#1: Load data for waterways in Fort Collins 
+
+# remotes::install_github("mikejohnson51/AOI")
+fc = AOI::geocode("Fort Collins", bbox = TRUE) 
+
+foco_rivers <- osmdata::opq(st_bbox(st_transform(fc,4326))) |> 
+  add_osm_feature("waterway") |> 
+  osmdata_sf()
+```
+
+```{r}
+#2 
+library(dplyr)
+library(sf)
+# Step 1: Filter for "Cache la Poudre River"
+poudre_river <- foco_rivers$osm_lines %>%
+  filter(grepl("Cache la Poudre", name, ignore.case = TRUE))
+
+# Step 2: Merge the lines into a single geometry
+poudre_merged <- st_union(poudre_river)
+
+# Step 3: Convert to an sf object
+poudre_merged_sf <- st_as_sf(poudre_merged)
+
+names(poudre_merged_sf)[1] <- "geometry"
+st_geometry(poudre_merged_sf) <- "geometry"
+
+```
+
+```{r}
+#3 
+poudre_projected <- st_transform(poudre_merged_sf, crs = 26913)
+
+poudre_length_m <- st_length(poudre_projected)
+poudre_length_km <- as.numeric(poudre_length_m) / 1000
+
+# Print the result
+print(paste("Length in meters:", round(poudre_length_m, 2)))
+print(paste("Length in kilometers:", round(poudre_length_km, 2)))
+
+```
+
+```{r}
+#4
+# Convert to points
+poudre_pts <- st_cast(poudre_projected, "POINT")
+head(poudre_pts)
+
+```
+# Define DEM Object
+
+```{r}
+#5 
+library(terra)
+library(glue)
+
+# Load DEM from GitHub using vsicurl
+url <- 'https://raw.githubusercontent.com/mikejohnson51/csu-ess-330/refs/heads/main/resources/foco-elev-cm.tif'
+dem <- rast(glue("/vsicurl/{url}"))
+
+```
+
+# Extract River Profile 
+```{r}
+#6
+# Set 'elevation_cm' as the geometry column
+st_geometry(poudre_pts) <- "elevation_cm"
+str(poudre_pts)
+
+# Reproject the points to the CRS of the DEM
+poudre_pts_proj <- st_transform(poudre_pts, crs(dem))
+
+# 2. Convert to SpatVector
+poudre_pts_vect <- vect(poudre_pts_proj)
+
+# 3. Extract elevation values
+elevation_vals <- extract(dem, poudre_pts_vect)
+
+# 4. Combine with points (optional)
+poudre_pts_with_elev <- cbind(poudre_pts_proj, elevation_vals[ , -1])
+
+head(poudre_pts_with_elev)
+```
+
+```{r}
+#7
+# Combine the spatial river points with the extracted elevation values using bind_cols
+poudre_pts_with_elev <- bind_cols(poudre_pts_proj, elevation_vals)
+
+# View the first few rows to check the result
+head(poudre_pts_with_elev)
+
+```
+
+```{r}
+#8
+poudre_pts_with_elev <- poudre_pts_with_elev %>%
+  mutate(ID = seq(1, n()))
+
+# View the updated data
+head(poudre_pts_with_elev)
+
+```
+
+# Compute Sinuosity
+```{r}
+#9 
+# Get the first and last points
+first_point <- poudre_pts_with_elev[1, ]
+last_point <- poudre_pts_with_elev[nrow(poudre_pts_with_elev), ]
+
+# Compute the straight-line distance between the first and last points
+distance_meters <- st_distance(first_point, last_point)
+
+# Print the distance in meters
+print(paste("Straight-line distance in meters:", as.numeric(distance_meters)))
+
+```
+
+```{r}
+#10 
+# Get the length of the river in meters (or use kilometers if preferred)
+river_length_m <- as.numeric(poudre_length_m)
+
+# Calculate sinuosity
+sinuosity <- river_length_m / as.numeric(distance_meters)
+
+# Print the sinuosity value
+print(paste("Sinuosity of the river:", round(sinuosity, 2)))
+
+## Report meaning: With a value greater than 1, the sinuoaity indicades a meandering river which makes sense for the Poudre. 
+
+```
+# Compute Slope
+```{r}
+# Extract the elevation values at the first and last points
+first_elevation <- poudre_pts_with_elev$elevation_cm[1]
+last_elevation <- poudre_pts_with_elev$elevation_cm[nrow(poudre_pts_with_elev)]
+
+# Compute the change in elevation (in cm)
+change_in_elevation <- last_elevation - first_elevation
+
+# Convert the river length to centimeters (since it's in meters)
+river_length_cm <- river_length_m * 100  # 1 meter = 100 centimeters
+
+# Calculate the slope (in cm per cm)
+slope <- change_in_elevation / river_length_cm
+
+head(slope)
+```
+
+```{r}
+#12
+# Rename columns for clarity; they got messed up earlier
+colnames(poudre_pts_with_elev) <- c("geometry", "dem", "ID", "ID_2", "dem_2", "elevation_cm", "ID_3")
+
+# Check the column names again to confirm
+colnames(poudre_pts_with_elev)
+
+# Create the line plot using ggplot
+ggplot(poudre_pts_with_elev, aes(x = ID, y = dem)) +  # Using the cleaned column names
+  geom_line(color = "blue") + # Blue line for elevation
+  geom_point(color = "red") + # Red points to highlight individual points
+  labs(
+    title = "Elevation Along the Cache la Poudre River",
+    x = "Point ID (along the river)",
+    y = "Elevation (cm)",
+    subtitle = "Elevation values along the river as a function of point ID",
+    caption = "Data: Cache la Poudre River"
+  ) +
+  theme_minimal() + # Clean, minimalist theme
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.subtitle = element_text(hjust = 0.5, size = 12),
+    axis.title = element_text(size = 10),
+    axis.text = element_text(size = 10),
+    plot.caption = element_text(size = 6)
+  )
+
+```
+
+```{r}
+#13
+library(ggplot2)
+library(scales)
+
+# Plot the spatial map of the river with elevation as color
+ggplot() +
+  geom_sf(data = poudre_pts_with_elev, aes(color = dem), size = 1) + # Plot river points and color by 'dem'
+  scale_color_viridis_c(option = "plasma", name = "Elevation (cm)") + # Nice color scale, adjust if needed
+  labs(
+    title = "Cache la Poudre River Profile",
+    subtitle = "Spatial map of the river with elevation colored",
+    caption = "Data: Cache la Poudre River"
+  ) +
+  theme_minimal() +  # Use a clean, minimalist theme
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16),
+    plot.subtitle = element_text(hjust = 0.5, size = 12),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    plot.caption = element_text(size = 8)
+  )
+
+```
+
