@@ -1,5 +1,6 @@
 ---
-title: "da27-28"
+title: "ESS 330 Daily Assignment 27 + 28"
+author: "Kendall Landwehr"
 format: html
 ---
 
