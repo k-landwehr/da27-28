@@ -158,7 +158,7 @@ river_length_cm <- river_length_m * 100  # 1 meter = 100 centimeters
 # Calculate the slope (in cm per cm)
 slope <- change_in_elevation / river_length_cm
 
-head(slope)
+slope(path)
 ```
 
 ```{r}
