@@ -76,29 +76,29 @@ dem <- rast(glue("/vsicurl/{url}"))
 # Extract River Profile 
 ```{r}
 #6
-# Set 'elevation_cm' as the geometry column
-st_geometry(poudre_pts) <- "elevation_cm"
-str(poudre_pts)
 
-# Reproject the points to the CRS of the DEM
+# Reproject the points to the DEM CRS
 poudre_pts_proj <- st_transform(poudre_pts, crs(dem))
 
-# 2. Convert to SpatVector
-poudre_pts_vect <- vect(poudre_pts_proj)
+# Extract elevation values using terra
+poudre_pts_vect <- terra::vect(poudre_pts_proj)
+elev_vals <- terra::extract(dem, poudre_pts_vect)
 
-# 3. Extract elevation values
-elevation_vals <- extract(dem, poudre_pts_vect)
+# Combine the elevation values with the reprojected points
+poudre_pts_with_elev <- dplyr::bind_cols(poudre_pts_proj, elev_vals[, -1])
 
-# 4. Combine with points (optional)
-poudre_pts_with_elev <- cbind(poudre_pts_proj, elevation_vals[ , -1])
+# Add a clean ID column (if not already there)
+poudre_pts_with_elev <- poudre_pts_with_elev |> dplyr::mutate(ID = dplyr::row_number())
 
+# Confirm it worked
 head(poudre_pts_with_elev)
+
 ```
 
 ```{r}
 #7
 # Combine the spatial river points with the extracted elevation values using bind_cols
-poudre_pts_with_elev <- bind_cols(poudre_pts_proj, elevation_vals)
+poudre_pts_with_elev <- bind_cols(poudre_pts_proj, elev_vals)
 
 # View the first few rows to check the result
 head(poudre_pts_with_elev)
@@ -159,21 +159,15 @@ river_length_cm <- river_length_m * 100  # 1 meter = 100 centimeters
 # Calculate the slope (in cm per cm)
 slope <- change_in_elevation / river_length_cm
 
-slope(path)
+slope
 ```
 
 ```{r}
 #12
-# Rename columns for clarity; they got messed up earlier
-colnames(poudre_pts_with_elev) <- c("geometry", "dem", "ID", "ID_2", "dem_2", "elevation_cm", "ID_3")
-
-# Check the column names again to confirm
-colnames(poudre_pts_with_elev)
-
-# Create the line plot using ggplot
+library(ggplot2)
 ggplot(poudre_pts_with_elev, aes(x = ID, y = dem)) +  # Using the cleaned column names
-  geom_line(color = "blue") + # Blue line for elevation
-  geom_point(color = "red") + # Red points to highlight individual points
+  geom_line(color = "blue") +  # Blue line for elevation
+  geom_point(color = "red") +  # Red points to highlight individual points
   labs(
     title = "Elevation Along the Cache la Poudre River",
     x = "Point ID (along the river)",
@@ -181,7 +175,7 @@ ggplot(poudre_pts_with_elev, aes(x = ID, y = dem)) +  # Using the cleaned column
     subtitle = "Elevation values along the river as a function of point ID",
     caption = "Data: Cache la Poudre River"
   ) +
-  theme_minimal() + # Clean, minimalist theme
+  theme_minimal() +  # Clean, minimalist theme
   theme(
     plot.title = element_text(hjust = 0.5, size = 16),
     plot.subtitle = element_text(hjust = 0.5, size = 12),
@@ -189,6 +183,7 @@ ggplot(poudre_pts_with_elev, aes(x = ID, y = dem)) +  # Using the cleaned column
     axis.text = element_text(size = 10),
     plot.caption = element_text(size = 6)
   )
+
 
 ```
 
